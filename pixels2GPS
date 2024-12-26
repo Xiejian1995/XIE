@@ -1,0 +1,104 @@
+import numpy as np
+import math
+from PIL import Image
+import csv
+
+def calculate_lat_lon(image_path, pixel_size, focal_length, altitude, longitude, latitude, omega, phi, kappa):
+    # 打开图片获取尺寸
+    image = Image.open(image_path)
+    image_width, image_height = image.size
+
+    # 地球常量
+    EARTH_RADIUS = 6356752.3142  # 地球半径，单位：米
+
+    # 图像中心点坐标
+    cx = image_width / 2
+    cy = image_height / 2
+
+    # 将角度转换为弧度
+    omega = math.radians(omega)
+    phi = math.radians(phi)
+    kappa = math.radians(kappa)
+
+    # 构造旋转矩阵
+    R_omega = np.array([
+        [1, 0, 0],
+        [0, math.cos(omega), -math.sin(omega)],
+        [0, math.sin(omega), math.cos(omega)]
+    ])
+
+    R_phi = np.array([
+        [math.cos(phi), 0, math.sin(phi)],
+        [0, 1, 0],
+        [-math.sin(phi), 0, math.cos(phi)]
+    ])
+
+    R_kappa = np.array([
+        [math.cos(kappa), -math.sin(kappa), 0],
+        [math.sin(kappa), math.cos(kappa), 0],
+        [0, 0, 1]
+    ])
+
+    R = R_kappa @ R_phi @ R_omega
+
+    # 结果存储
+    lat_lon_results = []
+
+    # 遍历每个像素
+    for y in range(image_height):
+        for x in range(image_width):
+            # 像素到图像平面的物理坐标
+            px = (x - cx) * pixel_size
+            py = (cy - y) * pixel_size
+
+            # 在相机坐标系中的坐标
+            camera_coords = np.array([px, py, -focal_length])
+
+            # 转换到地面坐标系
+            ground_coords = R @ camera_coords
+
+            # 归一化
+            scale = altitude / -ground_coords[2]
+            ground_coords *= scale
+
+            # 投影到地球表面
+            d_east = ground_coords[0]
+            d_north = ground_coords[1]
+
+            # 转换为经纬度
+            delta_lat = d_north / EARTH_RADIUS * (180 / math.pi)
+            delta_lon = d_east / (EARTH_RADIUS * math.cos(math.radians(latitude))) * (180 / math.pi)
+
+            pixel_lat = latitude + delta_lat
+            pixel_lon = longitude + delta_lon
+
+            lat_lon_results.append((x, y, pixel_lat, pixel_lon))
+
+    return lat_lon_results
+
+def save_to_csv(results, output_path):
+    # 保存结果到 CSV 文件
+    with open(output_path, mode='w', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        writer.writerow(['Pixel_X', 'Pixel_Y', 'Latitude', 'Longitude'])  # 写入表头
+        writer.writerows(results)  # 写入数据
+
+# 无人机参数
+image_path = "./XXXXXX0.JPG"  # 输入图片路径
+pixel_size = 3.76e-6  # 单位：米
+focal_length = 0.025  # 单位：米
+altitude = 252.6804  # 单位：米
+longitude = 173.1317732509  # 示例
+latitude = 87.7567128239    # 示例
+omega = -1.037948
+phi = -11.191988
+kappa = -87.318473
+output_csv_path = "./output_coordinates.csv"  # 输出 CSV 文件路径
+
+# 调用函数
+results = calculate_lat_lon(image_path, pixel_size, focal_length, altitude, longitude, latitude, omega, phi, kappa)
+
+# 保存到 CSV 文件
+save_to_csv(results, output_csv_path)
+
+print(f"计算完成！结果已保存到文件：{output_csv_path}")
